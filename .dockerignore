@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Environment files
+.env
+.env.*
+
+# IDE files
+.idea/
+.vscode/
+
+# Documentation
+README.md
+LICENSE
+
+# macOS specific files
+.DS_Store
+
+# Log files
+*.log
+
+# Docker files
+Dockerfile
+.dockerignore
