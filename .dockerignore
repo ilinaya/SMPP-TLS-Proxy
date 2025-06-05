@@ -27,3 +27,4 @@ LICENSE
 # Docker files
 Dockerfile
 .dockerignore
+push_images_ghcr.sh
