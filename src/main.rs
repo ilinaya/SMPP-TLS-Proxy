@@ -9,7 +9,7 @@ use rustls::{ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::Deserialize;
 use std::{
-    io::{self},
+    io::{self, Write},
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Instant,
@@ -323,15 +323,73 @@ async fn run_metrics_server(port: u16) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Print a message to stderr immediately to verify the application is starting
+    eprintln!("SMPP TLS Proxy starting up...");
+
+    // Set up panic handler to log panics
+    std::panic::set_hook(Box::new(|panic_info| {
+        eprintln!("Application panicked: {}", panic_info);
+        if let Some(location) = panic_info.location() {
+            eprintln!("Panic occurred in file '{}' at line {}", location.file(), location.line());
+        }
+        // Ensure logs are flushed
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+    }));
+
+    eprintln!("Panic handler set up successfully");
+
     // Load .env file if it exists
-    dotenv().ok();
+    match dotenv() {
+        Ok(_) => eprintln!("Loaded environment variables from .env file"),
+        Err(e) => eprintln!("No .env file found or error loading it: {}", e),
+    }
+
+    // Print environment variables for debugging (without sensitive data)
+    eprintln!("RUST_LOG: {:?}", std::env::var("RUST_LOG").unwrap_or_else(|_| "not set".to_string()));
+    eprintln!("LISTEN_PORT: {:?}", std::env::var("LISTEN_PORT").unwrap_or_else(|_| "not set".to_string()));
+    eprintln!("METRICS_PORT: {:?}", std::env::var("METRICS_PORT").unwrap_or_else(|_| "not set".to_string()));
+    eprintln!("UPSTREAM_HOSTS: {:?}", std::env::var("UPSTREAM_HOSTS").unwrap_or_else(|_| "not set".to_string()));
+    eprintln!("TLS_CERT: {}", if std::env::var("TLS_CERT").is_ok() { "[set]" } else { "not set" });
+    eprintln!("TLS_KEY: {}", if std::env::var("TLS_KEY").is_ok() { "[set]" } else { "not set" });
 
     // Initialize logger
+    eprintln!("Initializing logger...");
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    eprintln!("Logger initialized successfully");
+
+    // Log startup information
+    info!("Starting SMPP TLS Proxy");
+    info!("Running in Docker container: {}", std::env::var("CONTAINER").is_ok());
 
     // Parse configuration
     let config = Config::parse();
-    info!("Starting SMPP TLS Proxy");
+    info!("Configuration parsed successfully");
+
+    // Check for required environment variables
+    if config.tls_cert.is_empty() {
+        error!("TLS_CERT environment variable is empty or not set");
+        error!("Please check your environment variables and ensure they are set correctly");
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        return Err(anyhow::anyhow!("TLS_CERT environment variable is required"));
+    }
+
+    if config.tls_key.is_empty() {
+        error!("TLS_KEY environment variable is empty or not set");
+        error!("Please check your environment variables and ensure they are set correctly");
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        return Err(anyhow::anyhow!("TLS_KEY environment variable is required"));
+    }
+
+    if config.upstream_hosts.is_empty() {
+        error!("UPSTREAM_HOSTS environment variable is empty or not set");
+        error!("Please check your environment variables and ensure they are set correctly");
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        return Err(anyhow::anyhow!("UPSTREAM_HOSTS environment variable is required"));
+    }
 
     // Get upstream hosts
     let upstream_hosts = config.get_upstream_hosts().await;
@@ -376,10 +434,33 @@ async fn main() -> Result<()> {
 
     // Start TLS server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.listen_port));
-    let listener = TcpListener::bind(addr).await?;
+    info!("Attempting to bind to {}", addr);
+    let listener = match TcpListener::bind(addr).await {
+        Ok(listener) => {
+            info!("Successfully bound to {}", addr);
+            listener
+        },
+        Err(e) => {
+            error!("Failed to bind to {}: {}", addr, e);
+            error!("This could be due to the port already being in use or insufficient permissions");
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            return Err(anyhow::anyhow!("Failed to bind to {}: {}", addr, e));
+        }
+    };
     info!("Listening for SMPP TLS connections on {}", addr);
 
+    info!("Entering main connection acceptance loop");
+
+    // Add a counter to track loop iterations
+    let mut loop_iterations = 0;
+
     loop {
+        loop_iterations += 1;
+        if loop_iterations % 100 == 0 {
+            info!("Main loop still running, iteration {}", loop_iterations);
+        }
+
         match listener.accept().await {
             Ok((stream, addr)) => {
                 info!("Accepted connection from {}", addr);
@@ -405,7 +486,13 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 error!("Failed to accept connection: {}", e);
+                // Don't exit the loop on accept errors, just log and continue
+                let _ = std::io::stdout().flush();
+                let _ = std::io::stderr().flush();
             }
         }
+
+        // Small delay to prevent CPU spinning if there's an issue
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 }

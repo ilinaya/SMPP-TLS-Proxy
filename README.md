@@ -77,13 +77,56 @@ export RUST_LOG=info
 
 ## Docker
 
-### Build Docker Image
+### Using Prebuilt Image
+
+A prebuilt Docker image is available on GitHub Container Registry. You can pull and run it directly:
+
+```bash
+# Pull the image
+docker pull ghcr.io/ilinaya/smpp-tls-proxy:latest
+
+# Run the container
+docker run -d \
+  --name smpp-tls-proxy \
+  -p 3550:3550 \
+  -p 9090:9090 \
+  -e TLS_CERT=$(cat cert.pem | base64 -w 0) \
+  -e TLS_KEY=$(cat key.pem | base64 -w 0) \
+  -e UPSTREAM_HOSTS="10.0.0.1:2775,10.0.0.2:2775" \
+  -e RUST_LOG=info \
+  ghcr.io/ilinaya/smpp-tls-proxy:latest
+```
+
+#### Troubleshooting Docker Issues
+
+If the container exits immediately with exit code 0, try running it in interactive mode to see the logs:
+
+```bash
+docker run --rm -it \
+  -p 3550:3550 \
+  -p 9090:9090 \
+  -e TLS_CERT=$(cat cert.pem | base64 -w 0) \
+  -e TLS_KEY=$(cat key.pem | base64 -w 0) \
+  -e UPSTREAM_HOSTS="10.0.0.1:2775,10.0.0.2:2775" \
+  -e RUST_LOG=debug \
+  ghcr.io/ilinaya/smpp-tls-proxy:latest
+```
+
+Common issues:
+1. **Invalid certificate or key format**: Ensure your certificates are properly base64 encoded without newlines
+2. **Port already in use**: Check if ports 3550 or 9090 are already in use on your host
+3. **Missing environment variables**: Ensure all required environment variables are set
+4. **Network issues**: Check if the upstream hosts are reachable from the container
+
+### Build Your Own Docker Image
+
+If you prefer to build your own image:
 
 ```bash
 docker build -t smpp-tls-proxy:latest .
 ```
 
-### Run Docker Container
+### Run Docker Container (Custom Build)
 
 ```bash
 docker run -d \
